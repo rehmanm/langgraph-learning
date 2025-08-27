@@ -1,0 +1,8 @@
+langgraph
+langgraph-prebuilt
+langchain-core
+langchain-community
+langchain_google_genai
+langgraph-cli
+langgraph-api
+langgraph-cli[inmem]

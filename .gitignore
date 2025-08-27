@@ -124,6 +124,8 @@ __pypackages__/
 # Celery stuff
 celerybeat-schedule
 celerybeat.pid
+## Langgraph stuff
+*.pckl
 
 # SageMath parsed files
 *.sage.py
