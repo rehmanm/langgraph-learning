@@ -2,11 +2,27 @@ import operator
 from langgraph.graph import StateGraph, START, END, MessagesState
 from langgraph.checkpoint.memory import MemorySaver
 from typing import List, TypedDict, Annotated
-from langchain_google_genai import ChatGoogleGenerativeAI 
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import  HumanMessage, SystemMessage, get_buffer_string, AIMessage
 from pydantic import BaseModel, Field
 from langchain_tavily import TavilySearch
 from langchain_community.document_loaders import WikipediaLoader
+import warnings
+import urllib3
+from requests import sessions
+
+# Disable SSL warnings when verification is disabled
+warnings.filterwarnings('ignore', message='Unverified HTTPS request')
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# Monkey patch requests to disable SSL verification for corporate proxy compatibility
+original_request = sessions.Session.request
+
+def patched_request(self, method, url, *args, **kwargs):
+    kwargs['verify'] = False
+    return original_request(self, method, url, *args, **kwargs)
+
+sessions.Session.request = patched_request
 
 
 class Analyst(BaseModel):
@@ -140,7 +156,7 @@ def generate_questions(state: InterviewState):
         "messages": [question]
     }
 
-tavily_search = TavilySearch(max_results=3, verify_ssl=False)
+tavily_search = TavilySearch(max_results=3)
 
 # Search query writing
 search_instructions = SystemMessage(content=f"""You will be given a conversation between an analyst and an expert. 
