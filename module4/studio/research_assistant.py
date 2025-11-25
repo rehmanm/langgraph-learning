@@ -68,7 +68,7 @@ You are tasked with creating a set of AI analysts personas. Follow the instructi
 
 5. Assign one analyst to each theme.
 """
-model = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0.7)
+model = ChatGoogleGenerativeAI(model="gemini-2.0-flash")
 
 def create_analysts(state: GenerateAnalystsState):
 
@@ -181,9 +181,8 @@ def search_web(state: InterviewState):
     })
 
     search_docs = data.get("results", data)
-    print(f"search_docs: {search_docs}")
-
-     # Format
+    
+    # Format
     formatted_search_docs = "\n\n---\n\n".join(
         [
             f'<Document href="{doc["url"]}"/>\n{doc["content"]}\n</Document>'
@@ -253,13 +252,18 @@ def generate_answer(state: InterviewState):
         goals=analyst.persona,
         context=context
     )
+ 
+    
     answer = model.invoke([SystemMessage(content=system_message)] + messages)
+
     answer.name = "expert"
+ 
     return{
         "messages": [answer]
     }
 
 def save_inteview(state: InterviewState):
+    
     messages = state["messages"]
     interview = get_buffer_string(messages)
     return{
@@ -278,7 +282,8 @@ def route_messages(state: InterviewState,
     if num_responses >= max_num_turns:
         return "save_interview"
     
-    last_question = messages[-2]
+    last_question = messages[-2] 
+
 
     if "Thank you so much for your help" in last_question.content:
         return 'save_interview'
@@ -336,26 +341,25 @@ There should be no redundant sources. It should simply be:
 - Check that all guidelines have been followed"""
 
 def write_section(state: InterviewState):
-    interview = state["interview"]
-    analyst = state["analyst"]
     context = state["context"]
-
+    analyst = state["analyst"]
+   
+    # Write section using either the gathered source docs from interview (context) or the interview itself (interview)
     system_message = section_writer_instructions.format(
         focus = analyst.description
     )
-
     section = model.invoke(
         [
-            SystemMessage(content=system_message) 
-        ] 
+            SystemMessage(content=system_message)
+        ]
         +
         [
-            [HumanMessage(content=f"Use this source to write your section: {context}")]           
+            HumanMessage(content=f"Use this source to write your section: {context}")
         ]
-    )
+        )  
 
     return{
-        "sections": section.content
+        "sections": [section.content]
     }
 
 interview_builder = StateGraph(InterviewState)
@@ -378,7 +382,173 @@ interview_builder.add_edge("write_section", END)
 interview_graph = interview_builder.compile(checkpointer=memory).with_config(run_name="Conduct Interviews")
 
 
-graph = analyst_graph
+class ResearchGraphState(TypedDict):
+    topic: str
+    max_analysts: int
+    human_analysts_feedback: str
+    analysts: List[Analyst]
+    sections: Annotated[list, operator.add]
+    introduction: str
+    content: str
+    conclusion: str
+    final_report: str
+
+
+from langgraph.types import Send
+
+def initiate_all_interviews(state: ResearchGraphState):
+    human_analysts_feedback = state.get("human_analysts_feedback")
+    if human_analysts_feedback:
+        return "create_analysts"
+    else:
+        topic = state["topic"]
+        return[
+            Send("conduct_interview", {
+                "anlayst": analyst,
+                "messages": [
+                    HumanMessage(content=f"So you said you were writing an article on: {topic}")
+                ],
+            }) for analyst in state["analysts"]
+        ]
+
+report_writer_instructions = """You are a technical writer creating a report on this overall topic: 
+
+{topic}
+    
+You have a team of analysts. Each analyst has done two things: 
+
+1. They conducted an interview with an expert on a specific sub-topic.
+2. They write up their finding into a memo.
+
+Your task: 
+
+1. You will be given a collection of memos from your analysts.
+2. Think carefully about the insights from each memo.
+3. Consolidate these into a crisp overall summary that ties together the central ideas from all of the memos. 
+4. Summarize the central points in each memo into a cohesive single narrative.
+
+To format your report:
+ 
+1. Use markdown formatting. 
+2. Include no pre-amble for the report.
+3. Use no sub-heading. 
+4. Start your report with a single title header: ## Insights
+5. Do not mention any analyst names in your report.
+6. Preserve any citations in the memos, which will be annotated in brackets, for example [1] or [2].
+7. Create a final, consolidated list of sources and add to a Sources section with the `## Sources` header.
+8. List your sources in order and do not repeat.
+
+[1] Source 1
+[2] Source 2
+
+Here are the memos from your analysts to build your report from: 
+
+{context}"""
+
+
+def write_report(state: ResearchGraphState):
+    sections = state["sections"]
+    topic = state["topic"]
+
+    formatted_str_sections = "\n\n---\n\n".join([f"{section}" for section in sections])
+
+    system_message = report_writer_instructions.format(topic=topic, context=formatted_str_sections)
+
+    report = model.invoke([SystemMessage(content=system_message)]+[HumanMessage(content="Write the report based on the memos.")])
+
+    return{
+        "content": report.content
+    }
+
+
+intro_conclusion_instructions = """You are a technical writer finishing a report on {topic}
+
+You will be given all of the sections of the report.
+
+You job is to write a crisp and compelling introduction or conclusion section.
+
+The user will instruct you whether to write the introduction or conclusion.
+
+Include no pre-amble for either section.
+
+Target around 100 words, crisply previewing (for introduction) or recapping (for conclusion) all of the sections of the report.
+
+Use markdown formatting. 
+
+For your introduction, create a compelling title and use the # header for the title.
+
+For your introduction, use ## Introduction as the section header. 
+
+For your conclusion, use ## Conclusion as the section header.
+
+Here are the sections to reflect on for writing: {formatted_str_sections}"""
+
+def write_introduction(state: ResearchGraphState):
+    sections = state["sections"]
+    topic = state["topic"]
+
+    formatted_str_sections = "\n\n---\n\n".join([f"{section}" for section in sections])
+
+    instructions = intro_conclusion_instructions.format(topic=topic, formatted_str_sections=formatted_str_sections)
+
+    intro = model.invoke([SystemMessage(content=instructions)]+[HumanMessage(content="Write the report introduction.")])
+
+    return{
+        "introduction": intro.content
+    }
+
+def write_conclusion(state: ResearchGraphState):
+    sections = state["sections"]
+    topic = state["topic"]
+
+    formatted_str_sections = "\n\n---\n\n".join([f"{section}" for section in sections])
+
+    instructions = intro_conclusion_instructions.format(topic=topic, formatted_str_sections=formatted_str_sections)
+
+    conclusion = model.invoke([SystemMessage(content=instructions)]+[HumanMessage(content="Write the report conclusion.")])
+
+    return{
+        "conclusion": conclusion.content
+    }
+
+def finalize_report(state: ResearchGraphState):
+    """ The is the "reduce" step where we gather all the sections, combine them, and reflect on them to write the intro/conclusion """
+    # Save full final report
+    content = state["content"]
+    if content.startswith("## Insights"):
+        content = content.strip("## Insights")
+    if "## Sources" in content:
+        try:
+            content, sources = content.split("\n## Sources\n")
+        except:
+            sources = None
+    else:
+        sources = None
+
+    final_report = state["introduction"] + "\n\n---\n\n" + content + "\n\n---\n\n" + state["conclusion"]
+    if sources is not None:
+        final_report += "\n\n## Sources\n" + sources
+    return {"final_report": final_report}
+
+builder = StateGraph(ResearchGraphState)
+builder.add_node("create_analysts", analyst_graph)
+builder.add_node("human_feedback", human_feedback)
+builder.add_node("conduct_interview", interview_builder.compile())
+builder.add_node("write_report", write_report)
+builder.add_node("write_introduction", write_introduction)
+builder.add_node("write_conclusion", write_conclusion)
+builder.add_node("finalize_report", finalize_report)
+
+builder.add_edge(START, "create_analysts")
+builder.add_edge("create_analysts", "human_feedback")
+builder.add_conditional_edges("human_feedback", initiate_all_interviews, ["create_analysts", "conduct_interview"])
+builder.add_edge("conduct_interview", "write_report")
+builder.add_edge("conduct_interview", "write_introduction")
+builder.add_edge("conduct_interview", "write_conclusion")
+builder.add_edge(["write_conclusion", "write_report", "write_introduction"], "finalize_report")
+builder.add_edge("finalize_report", END)
+
+graph = builder.compile(interrupt_before=['human_feedback'], checkpointer=memory)
 
 
 
