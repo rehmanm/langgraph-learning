@@ -531,7 +531,7 @@ def finalize_report(state: ResearchGraphState):
     return {"final_report": final_report}
 
 builder = StateGraph(ResearchGraphState)
-builder.add_node("create_analysts", analyst_graph)
+builder.add_node("create_analysts", create_analysts)
 builder.add_node("human_feedback", human_feedback)
 builder.add_node("conduct_interview", interview_builder.compile())
 builder.add_node("write_report", write_report)

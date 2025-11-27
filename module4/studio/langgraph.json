@@ -4,7 +4,8 @@
     "parallelization": "./parallelization.py:graph",
     "sub_graph": "./sub_graph.py:graph",
     "map_reduce": "./map_reduce.py:graph",
-    "research_assistant": "./research_assistant.py:graph"
+    "research_assistant": "./research_assistant.py:graph",
+    "travel_assistant": "./travel_assistant.py:graph"
   },
   "env": "./.env",
   "python_version": "3.11",
